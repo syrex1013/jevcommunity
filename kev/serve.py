@@ -146,7 +146,7 @@ class Server:
     batched_requests: int = 0
     release_date: str = field(default="")   # for the TypeSafe model card; resolved once (may ask the Hub)
     truncate_states: bool = field(default_factory=lambda: TRUNCATE_STATES)   # KEV_TRUNCATE_STATES; off: an over-length state is refused (kev.model.admit)
-    quality: object | None = None   # optional second Server for confidence cascade (4B 8-bit)
+    quality: object | None = None   # optional (tok, model, requested) cascade pack; scored in-process (no second MLX worker)
 
     def __post_init__(self):
         self.release_date = self.release_date or self.checkpoint.release_date()
@@ -251,14 +251,34 @@ class Server:
         return self._maybe_escalate(req, body)
 
     def _maybe_escalate(self, req, body):
-        """Keep clear tickets on the fast model; re-score uncertain ones on the quality pack when configured."""
+        """Keep clear tickets on the fast model; re-score uncertain ones on the quality pack when configured.
+
+        The quality pack is scored in-process under its own lock. A second Server/worker on Metal contended
+        with the 0.8B path and blew uncertain-ticket latency to tens of seconds.
+        """
         if self.quality is None or not needs_escalation(body["answers"]):
             body.setdefault("escalated", False)
             return body
-        qbody = self.quality.answer(req)
+        qtok, qmodel, qrequested = self.quality
+        rec, meta = to_record(prepare(req))
+        t0 = time.perf_counter()
+        with self._quality_lock:
+            enc = admit(qmodel, qtok, rec, truncate=self.truncate_states)
+            raw = qmodel.probs(enc)
+            ps = [q.tolist() for q in raw]
+        q_latency = round((time.perf_counter() - t0) * 1000, 1)
+        stats = {
+            "tokens": len(enc["ids"]),
+            "state_tokens": enc["state_tokens"],
+            "state_tokens_used": enc["seg"].count(0),
+            "latency_ms": q_latency,
+        }
+        qbody = self._body(req, meta, ps, stats)
         qbody["escalated"] = True
-        qbody["latency_ms"] = round(float(body.get("latency_ms", 0)) + float(qbody.get("latency_ms", 0)), 1)
+        qbody["escalated_to"] = qrequested
         qbody["fast_latency_ms"] = body.get("latency_ms")
+        qbody["quality_latency_ms"] = q_latency
+        qbody["latency_ms"] = round(float(body.get("latency_ms", 0)) + q_latency, 1)
         return qbody
 
     def _body(self, req, meta, ps, m):
@@ -354,7 +374,7 @@ def models():
     a client may ignore: the run, the base, the device, the backend and precision, the temperature, prefix-cache stats."""
     s = server()
     ck, meta = s.checkpoint, s.checkpoint.meta
-    mode = "cascade" if s.quality is not None else ("mlx-8bit" if "quantized" in str(getattr(s.model, "dtype", "")) or getattr(s.model, "dtype", "") == "quantized" else "single")
+    mode = "cascade" if s.quality is not None else ("mlx-8bit" if getattr(s.model, "dtype", "") == "quantized" else "single")
     card = {"description": f"Kev pointer head on {meta.base}, serving {ck.requested} at temperature {s.model.head.temperature:.2f}",
             "jevcommunity_mode": mode,
             "escalate_run": ESCALATE_RUN or None,
@@ -442,13 +462,20 @@ def main():
             raise SystemExit(f"JEVCOMMUNITY_ESCALATE_RUN must be an MLX quantized pack; got {ESCALATE_RUN}")
         from .mlx_model import load_quantized_pack
         qtok, qmodel, qmeta = load_quantized_pack(qrun)
-        qck = Checkpoint.__new__(Checkpoint)
-        qck.requested = ESCALATE_RUN
-        qck.path = str(qrun)
-        qck.meta = qmeta
-        qck.release_date = lambda: "2026-09-24"
-        app.state.server.quality = Server(qck, qtok, qmodel, dev)
-        print(f"cascade quality pack {ESCALATE_RUN} (uncertain answers only)")
+        app.state.server.quality = (qtok, qmodel, ESCALATE_RUN)
+        app.state.server._quality_lock = threading.Lock()
+        # Warm Metal shaders so the first uncertain ticket does not pay compile cost.
+        warm_req = SystemOneRequest.model_validate({
+            "state": "warmup",
+            "model": "jev-latest",
+            "questions": {"q": {"type": "noul", "instructions": "warmup"}},
+        })
+        warm_rec, _ = to_record(prepare(warm_req))
+        with app.state.server._quality_lock:
+            warm_enc = admit(qmodel, qtok, warm_rec, truncate=True)
+            if hasattr(qmodel, "probs"):
+                qmodel.probs(warm_enc)
+        print(f"cascade quality pack {ESCALATE_RUN} (uncertain answers only; in-process MLX)")
     print(f"serving {ck.requested} ({ck.path}) on {dev} via {model.backend} ({model.dtype}) {a.host}:{a.port}; states over {SERVE_MAX_STATE:,} tokens "
           f"{'truncated (KEV_TRUNCATE_STATES=1)' if app.state.server.truncate_states else 'refused (422)'}")   # /v1/models reports the run as given, not the resolved cache path
     import uvicorn
