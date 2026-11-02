@@ -1,0 +1,16 @@
+JevCommunity
+Copyright (c) 2026 syrex1013
+
+This repository is licensed under the MIT License (see LICENSE).
+
+This product includes software from Jared Palmer's Kev (Apache-2.0).
+See third_party/kev/LICENSE for the upstream license text.
+Upstream source: https://github.com/jaredpalmer/kev
+Pinned commit: 2074cc44256200bb37540103fa4572901faa10f3
+
+Default weights: jaredpalmer/kev-0.8b@v1.0 on Hugging Face (Apache-2.0),
+base model Qwen/Qwen3.5-0.8B-Base (Apache-2.0).
+
+Jev and TypeSafe are trademarks of their respective owners. This project is
+an independent open-weight recreation of the System One API surface and is
+not affiliated with TypeSafe AI.

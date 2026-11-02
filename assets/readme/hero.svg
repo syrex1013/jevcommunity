@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 380" width="100%" role="img" aria-labelledby="title desc">
+  <title id="title">JevCommunity — local System One decisions on Apple Silicon</title>
+  <desc id="desc">Hero showing JevCommunity as a Mac-local Jev-compatible decision API with a real typed response card for choice, score, and noul answers.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0A1220"/>
+      <stop offset="100%" stop-color="#121A2C"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#182338"/>
+      <stop offset="100%" stop-color="#121B2D"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="380" rx="28" fill="url(#bg)"/>
+  <rect x="24" y="24" width="1152" height="332" rx="22" fill="none" stroke="#243149" stroke-width="1.5"/>
+
+  <!-- left copy -->
+  <text x="64" y="78" fill="#6FE7D4" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="20" font-weight="600" letter-spacing="2">LOCAL SYSTEM ONE</text>
+  <text x="64" y="138" fill="#F5F8FC" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="52" font-weight="700">JevCommunity</text>
+  <text x="64" y="182" fill="#C7D0E0" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="22">Typed decisions on your Mac mini — not chat text.</text>
+  <text x="64" y="216" fill="#8B95A8" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="20">POST /v1/systemone · choice · score · noul · MLX · Kev-0.8B</text>
+
+  <!-- motif pills -->
+  <g transform="translate(64,250)">
+    <rect width="110" height="36" rx="18" fill="#1B3B3A" stroke="#3EE0C9" stroke-width="1.5"/>
+    <text x="55" y="24" text-anchor="middle" fill="#3EE0C9" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16" font-weight="700">choice</text>
+    <rect x="124" width="100" height="36" rx="18" fill="#3A3118" stroke="#F0B429" stroke-width="1.5"/>
+    <text x="174" y="24" text-anchor="middle" fill="#F0B429" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16" font-weight="700">score</text>
+    <rect x="238" width="96" height="36" rx="18" fill="#1E2F4A" stroke="#7EB6FF" stroke-width="1.5"/>
+    <text x="286" y="24" text-anchor="middle" fill="#7EB6FF" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16" font-weight="700">noul</text>
+  </g>
+
+  <!-- right proof card from real run -->
+  <rect x="620" y="56" width="520" height="268" rx="18" fill="url(#card)" stroke="#2C3B57" stroke-width="1.5"/>
+  <text x="644" y="92" fill="#8B95A8" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16">POST /v1/systemone · measured</text>
+  <text x="644" y="128" fill="#F5F8FC" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="22" font-weight="700">department → technical</text>
+  <text x="644" y="158" fill="#3EE0C9" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18">confidence 0.9782</text>
+
+  <!-- probability bars -->
+  <text x="644" y="198" fill="#8B95A8" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16">billing</text>
+  <rect x="740" y="184" width="360" height="16" rx="8" fill="#0E1524"/>
+  <rect x="740" y="184" width="4" height="16" rx="8" fill="#8B95A8"/>
+  <text x="644" y="230" fill="#8B95A8" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16">technical</text>
+  <rect x="740" y="216" width="360" height="16" rx="8" fill="#0E1524"/>
+  <rect x="740" y="216" width="354" height="16" rx="8" fill="#3EE0C9"/>
+  <text x="644" y="262" fill="#8B95A8" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16">sales</text>
+  <rect x="740" y="248" width="360" height="16" rx="8" fill="#0E1524"/>
+  <rect x="740" y="248" width="2" height="16" rx="8" fill="#8B95A8"/>
+
+  <text x="644" y="300" fill="#C7D0E0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16">is_urgent.noul = 0.6999 · mlx · mps</text>
+</svg>

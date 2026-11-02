@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jevcommunity"
+version = "0.1.0"
+description = "Mac-local Jev-compatible System One decision server (Kev-0.8B on Apple Silicon)"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.12,<3.14"
+keywords = ["decision-model", "jev", "kev", "typesafe", "system-one"]
+dependencies = [
+    "accelerate>=1.15.0",
+    "numpy",
+    "peft>=0.21",
+    "pydantic>=2.9",
+    "scikit-learn",
+    "torch>=2.6,<2.9",
+    "transformers>=5.17,<6",
+]
+
+[project.optional-dependencies]
+serve = [
+    "fastapi>=0.115",
+    "typesafe-sdk>=0.6.0",
+    "uvicorn>=0.30",
+    "mlx-lm>=0.31.3,<0.32; sys_platform == 'darwin' and platform_machine == 'arm64'",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["server: needs a running kev.serve instance (JECOMMUNITY_BASE_URL)"]
+
+[tool.setuptools]
+packages = ["kev"]
