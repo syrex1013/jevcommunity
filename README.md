@@ -6,8 +6,6 @@
 
 **Local Jev-compatible decisions for software — on a Mac mini M4.**
 
-Default serve uses **Kev-0.8B** (~50 ms) and **escalates uncertain answers** to **Kev-4B MLX 8-bit** (quality ≈ index 38 vs 23) so clear tickets stay fast.
-
 Send one shared `state` and parallel typed questions (`choice` / `score` / `noul`). Get probability distributions and confidence back. No chat generation.
 
 <p align="center">
@@ -68,7 +66,9 @@ uv run --extra serve python -m kev.serve \
   --host 127.0.0.1 --port 8008 --device auto
 ```
 
-Leave `KEV_BACKEND` unset (auto → MLX on Darwin). Cascade on by default via `JEVCOMMUNITY_ESCALATE_RUN=RoderickQiu/kev-4b-mlx-8bit` (unset to force pure 0.8B). For always-on 4B: `--run RoderickQiu/kev-4b-mlx-8bit` (~8× slower). Optional `KEV_API_KEY` enables bearer auth.
+Leave `KEV_BACKEND` unset (auto → MLX on Darwin). Optional `KEV_API_KEY` enables bearer auth.
+
+**Quality without wrecking the default path:** on 16 GB, keep 0.8B as the everyday server. For harder tickets run a second process or restart with `JEVCOMMUNITY_QUALITY=1` (Kev-4B MLX 8-bit, ~400–500 ms warm). Do **not** dual-load both on this machine — unified memory + swap made escalations tens of seconds in testing.
 
 ### First request
 
@@ -120,7 +120,7 @@ JECOMMUNITY_BASE_URL=http://127.0.0.1:8008 uv run pytest -m server tests/test_sy
 ## Limits (read before upgrading models)
 
 - **Text primitives only** in this setup: `choice`, `score`, `noul`. No Box/images.
-- **Hardware:** Official bf16 Kev-4B wants ~32 GB. This repo’s cascade uses community **MLX 8-bit Kev-4B** (~6.6 GB resident) for quality on 16 GB without making every request pay 4B latency.
+- **Hardware:** Official bf16 Kev-4B wants ~32 GB. Community **MLX 8-bit Kev-4B** fits 16 GB **alone** (`JEVCOMMUNITY_QUALITY=1`). Dual-resident cascade with 0.8B is opt-in only and can thrash swap on 16 GB.
 - **Fallback:** if MLX fails, `KEV_BACKEND=torch … --device cpu`. If that OOMs, stop — don’t jump to 4B/9B without quantization.
 - **Not affiliated** with TypeSafe AI. “Jev” compatibility means API/schema/confidence formulas, not identical accuracy.
 
@@ -128,4 +128,4 @@ JECOMMUNITY_BASE_URL=http://127.0.0.1:8008 uv run pytest -m server tests/test_sy
 
 - **This repo:** MIT — see [`LICENSE`](./LICENSE). Funding: GitHub Sponsors [`syrex1013`](https://github.com/sponsors/syrex1013).
 - **Serve stack:** vendored from Jared Palmer’s [Kev](https://github.com/jaredpalmer/kev) @ `2074cc4` (Apache-2.0) — [`NOTICE`](./NOTICE), [`third_party/kev/LICENSE`](./third_party/kev/LICENSE).
-- **Weights:** fast `jaredpalmer/kev-0.8b@v1.0` (rev `9a45d25e`) on `Qwen/Qwen3.5-0.8B-Base`; cascade quality `RoderickQiu/kev-4b-mlx-8bit` (merged/8-bit from `jaredpalmer/kev-4b@v1.0`).
+- **Weights:** default `jaredpalmer/kev-0.8b@v1.0` on `Qwen/Qwen3.5-0.8B-Base`; optional quality `RoderickQiu/kev-4b-mlx-8bit` (merged/8-bit from `jaredpalmer/kev-4b@v1.0`).
