@@ -11,7 +11,7 @@ KEV_TRUNCATE_STATES=1 reads its first SERVE_MAX_STATE tokens instead, and then e
 and precision follow LoadOptions (KEV_BACKEND, KEV_DTYPE, ...): on Apple Silicon a hybrid checkpoint runs on MLX
 by default, without a torch MPS probe, elsewhere on torch in bf16.
 """
-import argparse, asyncio, atexit, hmac, os, queue, random, sys, threading, time, traceback, uuid
+import argparse, asyncio, atexit, hmac, json, os, queue, random, sys, threading, time, traceback, uuid
 from concurrent.futures import Future
 import torch
 from dataclasses import dataclass, field, replace
@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from .api import SystemOneRequest, to_record, to_answers, output_tokens, with_date_facts
-from .checkpoint import Checkpoint, LoadOptions, fused_available, is_hub_id, mlx_available
+from .checkpoint import Checkpoint, LoadOptions, fused_available, is_hub_id, mlx_available, resolve_run
 from .device import DEVICE_HELP, DEVICES, empty_cache, out_of_memory, select, sync
 from .model import SERVE_MAX_STATE, ContextOverflow, admit
 
@@ -32,7 +32,13 @@ DATE_FACTS = os.environ.get("KEV_DATE_FACTS", "0") == "1"
 TRUNCATE_STATES = os.environ.get("KEV_TRUNCATE_STATES", "0") == "1"    # unset = a state over SERVE_MAX_STATE tokens gets a 422; 1 = read its first SERVE_MAX_STATE tokens, and every response says whether it did (truncated, usage.state_tokens / state_tokens_used)
 API_KEY = os.environ.get("KEV_API_KEY")                                  # unset = open server; set = require Authorization: Bearer <key>, as the TypeSafe clients always send
 MAX_BATCH = 64                                                           # requests the model thread takes at once (kev.cuda_graphs splits them to fit its buffers)
-MODEL_NAMES = ("kev-latest", "jev-latest", "jevcommunity-0.8b")          # jev-latest is the TypeSafe SDK default; jevcommunity-0.8b is this repo's local alias
+MODEL_NAMES = ("kev-latest", "jev-latest", "jevcommunity-0.8b", "jevcommunity-4b-8bit")  # TypeSafe default + local aliases
+CASCADE_CONF_CHOICE = float(os.environ.get("JEVCOMMUNITY_CASCADE_CHOICE", "0.75"))
+CASCADE_CONF_SCORE = float(os.environ.get("JEVCOMMUNITY_CASCADE_SCORE", "0.35"))
+CASCADE_NOUL_LO = float(os.environ.get("JEVCOMMUNITY_CASCADE_NOUL_LO", "0.40"))
+CASCADE_NOUL_HI = float(os.environ.get("JEVCOMMUNITY_CASCADE_NOUL_HI", "0.60"))
+ESCALATE_RUN = os.environ.get("JEVCOMMUNITY_ESCALATE_RUN", "").strip()  # e.g. RoderickQiu/kev-4b-mlx-8bit; empty = no cascade
+
 
 
 @dataclass
@@ -90,6 +96,39 @@ class PrefixCache:
         self.entries.clear()
 
 
+
+def is_mlx_quant_pack(path):
+    """True when `path` is a merged MLX pack with quantization metadata (not a LoRA adapter dir)."""
+    from pathlib import Path
+    path = Path(path)
+    cfg = path / "config.json"
+    if not (cfg.exists() and (path / "model.safetensors").exists() and (path / "head.pt").exists()):
+        return False
+    try:
+        return "quantization" in json.loads(cfg.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+
+
+def needs_escalation(answers):
+    """Escalate only when routing signal is weak.
+
+    Score confidence is often modest even on clear tickets, so it alone must not
+    trip the 4B path or every request loses the ~50 ms fast path.
+    """
+    for a in answers.values():
+        t = a.get("type") if isinstance(a, dict) else getattr(a, "type", None)
+        if t == "choice":
+            conf = a["confidence"] if isinstance(a, dict) else a.confidence
+            if conf < CASCADE_CONF_CHOICE:
+                return True
+        elif t == "noul":
+            n = a["noul"] if isinstance(a, dict) else a.noul
+            if CASCADE_NOUL_LO < float(n) < CASCADE_NOUL_HI:
+                return True
+    return False
+
+
 @dataclass
 class Server:
     """The loaded checkpoint, the state-prefix cache (PrefixCache), and the one model thread that runs every forward pass.
@@ -107,6 +146,7 @@ class Server:
     batched_requests: int = 0
     release_date: str = field(default="")   # for the TypeSafe model card; resolved once (may ask the Hub)
     truncate_states: bool = field(default_factory=lambda: TRUNCATE_STATES)   # KEV_TRUNCATE_STATES; off: an over-length state is refused (kev.model.admit)
+    quality: object | None = None   # optional second Server for confidence cascade (4B 8-bit)
 
     def __post_init__(self):
         self.release_date = self.release_date or self.checkpoint.release_date()
@@ -200,13 +240,26 @@ class Server:
     def answer(self, req):
         """The /v1/systemone response body for one request."""
         rec, meta = to_record(prepare(req))
-        return self._body(req, meta, *self.probs(rec))
+        body = self._body(req, meta, *self.probs(rec))
+        return self._maybe_escalate(req, body)
 
     async def answer_async(self, req):
         """answer() for the event loop: a request waiting on the model thread holds no worker thread, so a container takes
         as many concurrent requests as its batches can absorb (FastAPI runs sync endpoints on a 40-thread pool)."""
         rec, meta = to_record(prepare(req))
-        return self._body(req, meta, *await asyncio.wrap_future(self.submit(rec)))
+        body = self._body(req, meta, *await asyncio.wrap_future(self.submit(rec)))
+        return self._maybe_escalate(req, body)
+
+    def _maybe_escalate(self, req, body):
+        """Keep clear tickets on the fast model; re-score uncertain ones on the quality pack when configured."""
+        if self.quality is None or not needs_escalation(body["answers"]):
+            body.setdefault("escalated", False)
+            return body
+        qbody = self.quality.answer(req)
+        qbody["escalated"] = True
+        qbody["latency_ms"] = round(float(body.get("latency_ms", 0)) + float(qbody.get("latency_ms", 0)), 1)
+        qbody["fast_latency_ms"] = body.get("latency_ms")
+        return qbody
 
     def _body(self, req, meta, ps, m):
         """The TypeSafe body. A server that may truncate (truncate_states) also says, on every response, whether it did:
@@ -301,7 +354,10 @@ def models():
     a client may ignore: the run, the base, the device, the backend and precision, the temperature, prefix-cache stats."""
     s = server()
     ck, meta = s.checkpoint, s.checkpoint.meta
+    mode = "cascade" if s.quality is not None else ("mlx-8bit" if "quantized" in str(getattr(s.model, "dtype", "")) or getattr(s.model, "dtype", "") == "quantized" else "single")
     card = {"description": f"Kev pointer head on {meta.base}, serving {ck.requested} at temperature {s.model.head.temperature:.2f}",
+            "jevcommunity_mode": mode,
+            "escalate_run": ESCALATE_RUN or None,
             "release_date": s.release_date,
             "run": ck.requested, "base": meta.base, "lora": meta.lora, "device": s.device, "backend": s.model.backend, "dtype": s.model.dtype,
             "temperature": s.model.head.temperature, "max_state_tokens": SERVE_MAX_STATE, "truncate_states": s.truncate_states,
@@ -338,6 +394,25 @@ def main():
     if run != a.run: print(f"{a.run} not found, falling back to {run}")
     opts = LoadOptions.from_env()
     if opts.backend is None: opts = replace(opts, backend="auto")   # serving default: MLX for the hybrid Qwen3.5 checkpoints on Apple Silicon (LoadOptions.backend); KEV_BACKEND=torch to decline
+    # Quantized MLX packs skip Checkpoint()/torch probes entirely.
+    resolved_early = None
+    try:
+        resolved_early = resolve_run(run) if is_hub_id(run) else run
+    except Exception:
+        resolved_early = run if os.path.exists(run) else None
+    if resolved_early and is_mlx_quant_pack(resolved_early):
+        from .mlx_model import load_quantized_pack
+        tok, model, meta = load_quantized_pack(resolved_early)
+        ck = Checkpoint.__new__(Checkpoint)
+        ck.requested = run
+        ck.path = str(resolved_early)
+        ck.meta = meta
+        ck.release_date = lambda: "2026-09-24"
+        app.state.server = Server(ck, tok, model, "mps")
+        print(f"serving quantized MLX pack {run} on mps via {model.backend} ({model.dtype}) {a.host}:{a.port}")
+        import uvicorn
+        uvicorn.run(app, host=a.host, port=a.port)
+        return
     dev, ck = _serving_device(a.device, opts, run)
     if dev == "mps" and opts.attn is None: opts = replace(opts, attn="sdpa")   # serving default on Apple GPUs (parity measured)
     if dev != "cpu" and opts.dtype is None: opts = replace(opts, dtype=torch.bfloat16)   # serving default: 2-4.5x faster than fp32 on an L4, same answers (LoadOptions.dtype); KEV_DTYPE=fp32 for the exact path
@@ -345,9 +420,35 @@ def main():
     if cuda_optimizations and opts.cuda_graphs is None: opts = replace(opts, cuda_graphs=True)   # serving default: a pass is ~2,000 kernel launches, so replaying graphs cuts warm latency several-fold (kev.cuda_graphs); KEV_CUDA_GRAPHS=0 to decline
     fused_default = cuda_optimizations and opts.fused is None
     if fused_default: opts = replace(opts, fused=fused_available())   # serving default: fused Qwen3.5 kernels, ~1/3 less GPU time per batch (kev.fused_qwen35), when fla is installed; KEV_FUSED=0 to decline, KEV_FUSED=1 to insist
-    tok, model = ck.load(dev, opts)
-    if fused_default and not opts.fused and model.hybrid: print("fused Qwen3.5 kernels off: install the flash-linear-attention version kev/fused_qwen35.py pins (FLA_VERSION) to turn them on")
+    resolved = resolve_run(run) if is_hub_id(run) else run
+    if is_mlx_quant_pack(resolved):
+        from .mlx_model import load_quantized_pack
+        from .checkpoint import Meta
+        tok, model, meta = load_quantized_pack(resolved)
+        # Minimal checkpoint stand-in so /v1/models keeps working.
+        ck = Checkpoint.__new__(Checkpoint)
+        ck.requested = run
+        ck.path = str(resolved)
+        ck.meta = meta
+        ck.release_date = lambda: "2026-09-24"
+        print(f"loaded MLX quantized pack {run}")
+    else:
+        tok, model = ck.load(dev, opts)
+        if fused_default and not opts.fused and model.hybrid: print("fused Qwen3.5 kernels off: install the flash-linear-attention version kev/fused_qwen35.py pins (FLA_VERSION) to turn them on")
     app.state.server = Server(ck, tok, model, dev)
+    if ESCALATE_RUN and not is_mlx_quant_pack(resolved):
+        qrun = resolve_run(ESCALATE_RUN) if is_hub_id(ESCALATE_RUN) else ESCALATE_RUN
+        if not is_mlx_quant_pack(qrun):
+            raise SystemExit(f"JEVCOMMUNITY_ESCALATE_RUN must be an MLX quantized pack; got {ESCALATE_RUN}")
+        from .mlx_model import load_quantized_pack
+        qtok, qmodel, qmeta = load_quantized_pack(qrun)
+        qck = Checkpoint.__new__(Checkpoint)
+        qck.requested = ESCALATE_RUN
+        qck.path = str(qrun)
+        qck.meta = qmeta
+        qck.release_date = lambda: "2026-09-24"
+        app.state.server.quality = Server(qck, qtok, qmodel, dev)
+        print(f"cascade quality pack {ESCALATE_RUN} (uncertain answers only)")
     print(f"serving {ck.requested} ({ck.path}) on {dev} via {model.backend} ({model.dtype}) {a.host}:{a.port}; states over {SERVE_MAX_STATE:,} tokens "
           f"{'truncated (KEV_TRUNCATE_STATES=1)' if app.state.server.truncate_states else 'refused (422)'}")   # /v1/models reports the run as given, not the resolved cache path
     import uvicorn

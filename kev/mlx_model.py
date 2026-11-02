@@ -125,6 +125,37 @@ def merge_lora(lm, adapter_dir, scale=1.0):
     return len(merged)
 
 
+
+def embed_width(embed_tokens):
+    """Hidden size of an mlx embedding, including mlx.nn.QuantizedEmbedding (no dense `.weight`)."""
+    if hasattr(embed_tokens, "dims"):
+        return int(embed_tokens.dims)
+    return int(embed_tokens.weight.shape[-1])
+
+
+def load_quantized_pack(path):
+    """Load a merged+quantized MLX pack (config.json + model.safetensors + head.pt + tokenizer).
+
+    Used for community 8-bit Kev-4B packs that fit 16 GB Macs without the bf16 base+merge peak.
+    -> (tokenizer, MLXDecisionModel, Meta)
+    """
+    import torch
+    from pathlib import Path
+    from transformers import AutoTokenizer
+    from .checkpoint import Meta
+    from .model import pad_id
+
+    path = Path(path)
+    tok = AutoTokenizer.from_pretrained(path, trust_remote_code=True)
+    meta = Meta.from_dict(torch.load(path / "head.pt", map_location="cpu", weights_only=False))
+    lm, _cfg = load_model(path)
+    mx.eval(lm.parameters())
+    mx.clear_cache()
+    model = MLXDecisionModel(lm, pad_id(tok), head_dim=meta.head_dim)
+    model.head.load_state_dict(meta.head)
+    model.head.temperature = meta.temperature
+    return tok, model, meta
+
 class MLXDecisionModel:
     """Prefill-only scorer: hidden states from mlx-lm, logits from the shared torch PointerHead."""
     backend, device, hybrid, option_isolation = "mlx", "mlx", True, False
@@ -134,11 +165,15 @@ class MLXDecisionModel:
         self.lm = lm                                                  # mlx-lm qwen3_5.Model from load_base (+ merge_lora) or load_full
         self.text = self.lm.language_model.model                      # Qwen3_5TextModel: embeddings -> layers -> final norm = `.model.last_hidden_state`
         self.pad_id = pad_id
-        self.head = PointerHead(self.text.embed_tokens.weight.shape[1], dp=head_dim).eval()
+        self.head = PointerHead(embed_width(self.text.embed_tokens), dp=head_dim).eval()
 
     @property
     def dtype(self):
-        return str(self.text.embed_tokens.weight.dtype).removeprefix("mlx.core.")
+        emb = self.text.embed_tokens
+        w = getattr(emb, "weight", None)
+        if w is None:
+            return "quantized"
+        return str(w.dtype).removeprefix("mlx.core.")
 
     def eval(self):
         self.head.eval(); return self

@@ -46,6 +46,7 @@ def test_models_lists_local_aliases():
     names = {m["name"] for m in r.json()["models"]}
     assert "jev-latest" in names
     assert "jevcommunity-0.8b" in names
+    assert "jevcommunity-4b-8bit" in names
 
 
 @pytest.mark.server
@@ -69,3 +70,6 @@ def test_systemone_ticket_shape():
     assert urgent["type"] == "noul"
     assert isinstance(urgent["noul"], (int, float))
     assert 0.0 <= float(urgent["noul"]) <= 1.0
+    assert "escalated" in body
+    assert body.get("escalated") is False
+    assert body["latency_ms"] < 1000  # clear ticket stays on 0.8B (allow cold/contended spike)

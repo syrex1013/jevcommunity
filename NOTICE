@@ -14,3 +14,5 @@ base model Qwen/Qwen3.5-0.8B-Base (Apache-2.0).
 Jev and TypeSafe are trademarks of their respective owners. This project is
 an independent open-weight recreation of the System One API surface and is
 not affiliated with TypeSafe AI.
+
+Cascade quality pack: RoderickQiu/kev-4b-mlx-8bit (Apache-2.0), merged/8-bit conversion of jaredpalmer/kev-4b; not an official Kev release.
