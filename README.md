@@ -50,6 +50,8 @@ Ticket about API 500s → routing decision on `127.0.0.1:8008` with MLX:
 
 Accepted `model` names: `kev-latest`, `jev-latest`, `jevcommunity-0.8b`, `jevcommunity-4b-8bit`.
 
+How-to + single-file client: [`GUIDE.md`](./GUIDE.md) · [`example_single.py`](./example_single.py)
+
 ## Quick start
 
 **Needs:** macOS arm64, [uv](https://docs.astral.sh/uv/), Python 3.13, Hugging Face network on first download (~few GB for adapter + `Qwen/Qwen3.5-0.8B-Base`).
