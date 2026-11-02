@@ -68,7 +68,7 @@ uv run --extra serve python -m kev.serve \
 
 Leave `KEV_BACKEND` unset (auto → MLX on Darwin). Optional `KEV_API_KEY` enables bearer auth.
 
-**Quality without wrecking the default path:** on 16 GB, keep 0.8B as the everyday server. For harder tickets run a second process or restart with `JEVCOMMUNITY_QUALITY=1` (Kev-4B MLX 8-bit, ~400–500 ms warm). Do **not** dual-load both on this machine — unified memory + swap made escalations tens of seconds in testing.
+**Fast + accurate (default):** `./scripts/serve_mac.sh` loads Kev-0.8B for clear tickets (~50 ms) and escalates uncertain ones to **AbstractFramework/kev-4b-mlx-4bit** (near-bf16 Kev-4B accuracy, ~3 GB). The earlier 8-bit dual-load thrashed 16 GB swap; 4-bit is the cascade that fits. Opt out with `JEVCOMMUNITY_ESCALATE_RUN=off`. Quality-only: `JEVCOMMUNITY_QUALITY=1` (4-bit 4B alone).
 
 ### First request
 
@@ -120,7 +120,7 @@ JECOMMUNITY_BASE_URL=http://127.0.0.1:8008 uv run pytest -m server tests/test_sy
 ## Limits (read before upgrading models)
 
 - **Text primitives only** in this setup: `choice`, `score`, `noul`. No Box/images.
-- **Hardware:** Official bf16 Kev-4B wants ~32 GB. Community **MLX 8-bit Kev-4B** fits 16 GB **alone** (`JEVCOMMUNITY_QUALITY=1`). Dual-resident cascade with 0.8B is opt-in only and can thrash swap on 16 GB.
+- **Hardware:** Official bf16 Kev-4B wants ~32 GB. Default cascade uses community **MLX 4-bit Kev-4B** (~3 GB) beside 0.8B on 16 GB. Prefer 4-bit over 8-bit for dual-resident; 8-bit dual-load thrashed swap in testing.
 - **Fallback:** if MLX fails, `KEV_BACKEND=torch … --device cpu`. If that OOMs, stop — don’t jump to 4B/9B without quantization.
 - **Not affiliated** with TypeSafe AI. “Jev” compatibility means API/schema/confidence formulas, not identical accuracy.
 
@@ -128,4 +128,4 @@ JECOMMUNITY_BASE_URL=http://127.0.0.1:8008 uv run pytest -m server tests/test_sy
 
 - **This repo:** MIT — see [`LICENSE`](./LICENSE). Funding: GitHub Sponsors [`syrex1013`](https://github.com/sponsors/syrex1013).
 - **Serve stack:** vendored from Jared Palmer’s [Kev](https://github.com/jaredpalmer/kev) @ `2074cc4` (Apache-2.0) — [`NOTICE`](./NOTICE), [`third_party/kev/LICENSE`](./third_party/kev/LICENSE).
-- **Weights:** default `jaredpalmer/kev-0.8b@v1.0` on `Qwen/Qwen3.5-0.8B-Base`; optional quality `RoderickQiu/kev-4b-mlx-8bit` (merged/8-bit from `jaredpalmer/kev-4b@v1.0`).
+- **Weights:** default fast `jaredpalmer/kev-0.8b@v1.0` on `Qwen/Qwen3.5-0.8B-Base`; default quality escalate `AbstractFramework/kev-4b-mlx-4bit` (merged/4-bit from `jaredpalmer/kev-4b@v1.0`, Gated DeltaNet projections kept 8-bit).

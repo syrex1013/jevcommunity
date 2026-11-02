@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Local Mac entrypoint for JevCommunity.
-# Default: Kev-0.8B on MLX (~50 ms) — fits 16 GB without swap thrash.
-# Quality (slower, ~8x): JEVCOMMUNITY_QUALITY=1 ./scripts/serve_mac.sh
-#   -> serves RoderickQiu/kev-4b-mlx-8bit alone (~400-500 ms warm)
-# Optional cascade (NOT recommended on 16 GB): export JEVCOMMUNITY_ESCALATE_RUN=RoderickQiu/kev-4b-mlx-8bit
-#   Dual-resident 0.8B+4B tends to swap and can make escalations tens of seconds.
+# Default: fast+accurate cascade
+#   Kev-0.8B (~50 ms clear tickets) + AbstractFramework/kev-4b-mlx-4bit for uncertain ones
+#   4-bit quality pack (~3 GB) is meant to co-reside with 0.8B on 16 GB without the 8-bit swap thrash.
+# Quality-only: JEVCOMMUNITY_QUALITY=1 ./scripts/serve_mac.sh  -> 4-bit 4B alone
+# Fast-only:    JEVCOMMUNITY_ESCALATE_RUN=off ./scripts/serve_mac.sh
 # Env:
 #   leave KEV_BACKEND unset (auto → MLX on Darwin)
 #   optional KEV_API_KEY for bearer auth (unset = open local server)
@@ -12,12 +12,13 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 uv sync --extra serve
 if [[ "${JEVCOMMUNITY_QUALITY:-}" == "1" ]]; then
-  exec uv run --extra serve python -m kev.serve \
-    --run RoderickQiu/kev-4b-mlx-8bit \
+  exec env JEVCOMMUNITY_ESCALATE_RUN=off uv run --extra serve python -m kev.serve \
+    --run AbstractFramework/kev-4b-mlx-4bit \
     --host 127.0.0.1 \
     --port 8008 \
     --device auto
 fi
+export JEVCOMMUNITY_ESCALATE_RUN="${JEVCOMMUNITY_ESCALATE_RUN:-AbstractFramework/kev-4b-mlx-4bit}"
 exec uv run --extra serve python -m kev.serve \
   --run jaredpalmer/kev-0.8b@v1.0 \
   --host 127.0.0.1 \

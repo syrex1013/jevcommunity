@@ -37,7 +37,9 @@ CASCADE_CONF_CHOICE = float(os.environ.get("JEVCOMMUNITY_CASCADE_CHOICE", "0.75"
 CASCADE_CONF_SCORE = float(os.environ.get("JEVCOMMUNITY_CASCADE_SCORE", "0.35"))
 CASCADE_NOUL_LO = float(os.environ.get("JEVCOMMUNITY_CASCADE_NOUL_LO", "0.40"))
 CASCADE_NOUL_HI = float(os.environ.get("JEVCOMMUNITY_CASCADE_NOUL_HI", "0.60"))
-ESCALATE_RUN = os.environ.get("JEVCOMMUNITY_ESCALATE_RUN", "").strip()  # e.g. RoderickQiu/kev-4b-mlx-8bit; empty = no cascade
+# Cascade quality pack. Empty / "0" / "off" disables. Default 4-bit Kev-4B fits with 0.8B on 16 GB.
+_ESCALATE_RAW = os.environ.get("JEVCOMMUNITY_ESCALATE_RUN", "AbstractFramework/kev-4b-mlx-4bit").strip()
+ESCALATE_RUN = "" if _ESCALATE_RAW.lower() in {"", "0", "off", "false", "none"} else _ESCALATE_RAW
 
 
 
@@ -102,7 +104,9 @@ def is_mlx_quant_pack(path):
     from pathlib import Path
     path = Path(path)
     cfg = path / "config.json"
-    if not (cfg.exists() and (path / "model.safetensors").exists() and (path / "head.pt").exists()):
+    has_weights = (path / "model.safetensors").exists()
+    has_head = (path / "head.pt").exists() or ((path / "head.safetensors").exists() and (path / "decision.json").exists())
+    if not (cfg.exists() and has_weights and has_head):
         return False
     try:
         return "quantization" in json.loads(cfg.read_text(encoding="utf-8"))
@@ -410,7 +414,7 @@ def main():
     ap.add_argument("--port", type=int, default=8008)
     ap.add_argument("--device", choices=("auto", *DEVICES), default="auto", help=DEVICE_HELP)
     a = ap.parse_args()
-    run = a.run if is_hub_id(a.run) or os.path.exists(f"{a.run}/head.pt") else a.fallback
+    run = a.run if is_hub_id(a.run) or os.path.exists(f"{a.run}/head.pt") or (os.path.exists(f"{a.run}/head.safetensors") and os.path.exists(f"{a.run}/decision.json")) else a.fallback
     if run != a.run: print(f"{a.run} not found, falling back to {run}")
     opts = LoadOptions.from_env()
     if opts.backend is None: opts = replace(opts, backend="auto")   # serving default: MLX for the hybrid Qwen3.5 checkpoints on Apple Silicon (LoadOptions.backend); KEV_BACKEND=torch to decline

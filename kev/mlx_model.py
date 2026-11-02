@@ -134,9 +134,12 @@ def embed_width(embed_tokens):
 
 
 def load_quantized_pack(path):
-    """Load a merged+quantized MLX pack (config.json + model.safetensors + head.pt + tokenizer).
+    """Load a merged+quantized MLX pack (config.json + model.safetensors + head + tokenizer).
 
-    Used for community 8-bit Kev-4B packs that fit 16 GB Macs without the bf16 base+merge peak.
+    Accepts community packs with either:
+      - head.pt (RoderickQiu-style), or
+      - head.safetensors + decision.json (AbstractFramework-style 4/8-bit).
+    Used so Kev-4B fits 16 GB Macs without the bf16 base+merge peak.
     -> (tokenizer, MLXDecisionModel, Meta)
     """
     import torch
@@ -147,7 +150,8 @@ def load_quantized_pack(path):
 
     path = Path(path)
     tok = AutoTokenizer.from_pretrained(path, trust_remote_code=True)
-    meta = Meta.from_dict(torch.load(path / "head.pt", map_location="cpu", weights_only=False))
+    meta = _meta_from_quant_pack(path)
+    mx.set_cache_limit(CACHE_LIMIT)
     lm, _cfg = load_model(path)
     mx.eval(lm.parameters())
     mx.clear_cache()
@@ -155,6 +159,37 @@ def load_quantized_pack(path):
     model.head.load_state_dict(meta.head)
     model.head.temperature = meta.temperature
     return tok, model, meta
+
+
+def _meta_from_quant_pack(path):
+    """Build Meta from head.pt or AbstractFramework decision.json + head.safetensors."""
+    import torch
+    from pathlib import Path
+    from .checkpoint import Meta
+
+    path = Path(path)
+    head_pt = path / "head.pt"
+    if head_pt.exists():
+        return Meta.from_dict(torch.load(head_pt, map_location="cpu", weights_only=False))
+    head_st = path / "head.safetensors"
+    decision = path / "decision.json"
+    if not (head_st.exists() and decision.exists()):
+        raise FileNotFoundError(f"{path}: need head.pt or head.safetensors+decision.json")
+    from safetensors.torch import load_file
+    dec = json.loads(decision.read_text(encoding="utf-8"))
+    head = load_file(str(head_st))
+    return Meta.from_dict({
+        "base": dec.get("base", "Qwen/Qwen3.5-4B-Base"),
+        "base_revision": dec.get("base_revision"),
+        "head": head,
+        "head_dim": int(dec.get("head_dim", 256)),
+        "temperature": float(dec.get("temperature", 1.0)),
+        "lora": int(dec.get("lora_rank", 0) or 0),
+        "weights_dtype": "fp32",
+        "weights": "full",
+        "option_isolation": False,
+        "special_embeddings": False,
+    })
 
 class MLXDecisionModel:
     """Prefill-only scorer: hidden states from mlx-lm, logits from the shared torch PointerHead."""
