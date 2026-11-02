@@ -105,7 +105,13 @@ curl -sS http://127.0.0.1:8008/v1/systemone \
   }'
 ```
 
-Or via TypeSafe SDK:
+Or interactively (paste tickets at the prompt):
+
+```bash
+uv run --extra serve python example.py
+```
+
+Or via TypeSafe SDK (one-shot sample ticket):
 
 ```bash
 uv run --extra serve python examples/route_ticket.py
